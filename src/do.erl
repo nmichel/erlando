@@ -95,6 +95,10 @@ pattern({cons,Line,H0,T0}) ->
 pattern({tuple,Line,Ps0}) ->
     Ps1 = pattern_list(Ps0),
     {tuple,Line,Ps1};
+%% OTP 17.0: EEP 443: Map pattern
+pattern({map, Line, Fields0}) ->
+    Fields1 = map_fields(Fields0, []),
+    {map, Line, Fields1};
 %%pattern({struct,Line,Tag,Ps0}) ->
 %%    Ps1 = pattern_list(Ps0),
 %%    {struct,Line,Tag,Ps1};
@@ -186,9 +190,6 @@ expr({atom, Line, A}, _MonadStack)    -> {atom, Line, A};
 expr({string, Line, S}, _MonadStack)  -> {string, Line, S};
 expr({char, Line, C}, _MonadStack)    -> {char, Line, C};
 expr({nil, Line}, _MonadStack)        -> {nil, Line};
-%% don't know how to treat map's (yet), just pass them through
-expr({map, Line, V, M}, _MonadStack)  -> {map, Line, V, M};
-expr({map, Line, V}, _MonadStack)  -> {map, Line, V};
 expr({cons, Line, H0, T0}, MonadStack) ->
     H1 = expr(H0, MonadStack),
     T1 = expr(T0, MonadStack), %% They see the same variables
@@ -204,6 +205,15 @@ expr({bc, Line, E0, Qs0}, MonadStack) ->
 expr({tuple, Line, Es0}, MonadStack) ->
     Es1 = expr_list(Es0, MonadStack),
     {tuple, Line, Es1};
+%% OTP 17.0: EEP 443: Map construction
+expr({map, Line, Fields0}, MonadStack) ->
+    Fields1 = map_fields(Fields0, MonadStack),
+    {map, Line, Fields1};
+%% OTP 17.0: EEP 443: Map update
+expr({map, Line, Expr0, Fields0}, MonadStack) ->
+    Expr1 = expr(Expr0, MonadStack),
+    Fields1 = map_fields(Fields0, MonadStack),
+    {map, Line, Expr1, Fields1};
 expr({record_index, Line, Name, Field0}, MonadStack) ->
     Field1 = expr(Field0, MonadStack),
     {record_index, Line, Name, Field1};
@@ -257,6 +267,10 @@ expr({'fun', Line, Body}, MonadStack) ->
         {function, M, F, A} -> %% R10B-6: fun M:F/A.
             {'fun', Line, {function, M, F, A}}
     end;
+%% OTP 17.0: EEP 37: Funs with names
+expr({named_fun, Line, Name, Cs0}, MonadStack) ->
+    Cs1 = fun_clauses(Cs0, MonadStack),
+    {named_fun, Line, Name, Cs1};
 %%  do syntax detection:
 expr({call, Line, {atom, _Line1, do},
       [{lc, _Line2, {AtomOrVar, _Line3, _MonadModule} = Monad, Qs}]},
@@ -322,6 +336,17 @@ expr_list([E0|Es], MonadStack) ->
     E1 = expr(E0, MonadStack),
     [E1|expr_list(Es, MonadStack)];
 expr_list([], _MonadStack) -> [].
+
+%% -type map_fields([MapField]) -> [MapField].
+map_fields([{map_field_assoc, Line, ExpK0, ExpV0}|Fs], MonadStack) ->
+    ExpK1 = expr(ExpK0, MonadStack),
+    ExpV1 = expr(ExpV0, MonadStack),
+    [{map_field_assoc, Line, ExpK1, ExpV1}|map_fields(Fs, MonadStack)];
+map_fields([{map_field_exact, Line, ExpK0, ExpV0}|Fs], MonadStack) ->
+    ExpK1 = expr(ExpK0, MonadStack),
+    ExpV1 = expr(ExpV0, MonadStack),
+    [{map_field_exact, Line, ExpK1, ExpV1}|map_fields(Fs, MonadStack)];
+map_fields([], _MoandStack) -> [].
 
 %% -type record_inits([RecordInit]) -> [RecordInit].
 %%  N.B. Field names are full expressions here but only atoms are allowed
